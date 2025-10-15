@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Texas Hold'em Poker - Multiplayer</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: Arial, sans-serif;
+            background: #0a1a0a;
+            color: #ffffff;
+            overflow: hidden;
+        }
+
+        #gameContainer {
+            width: 100vw;
+            height: 100vh;
+            position: relative;
+        }
+
+        .ui-overlay {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: rgba(0, 20, 0, 0.9);
+            padding: 20px;
+            border-radius: 10px;
+            border: 2px solid #4CAF50;
+            min-width: 250px;
+            z-index: 100;
+            font-size: 14px;
+        }
+
+        .stats-title {
+            color: #4CAF50;
+            font-size: 16px;
+            font-weight: bold;
+            margin-bottom: 10px;
+            border-bottom: 1px solid #4CAF50;
+            padding-bottom: 5px;
+        }
+
+        .stat-item {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 5px;
+        }
+
+        .debug-info {
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 10px;
+            border-radius: 5px;
+            font-size: 12px;
+            z-index: 2000;
+            max-width: 300px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+    </style>
+</head>
+<body>
+    <div id="gameContainer">
+        <!-- Game will be rendered here -->
+        
+        <!-- UI Overlay -->
+        <div class="ui-overlay">
+            <div class="stats-title">🃏 Game Statistics</div>
+            <div class="stat-item">
+                <span>Games Played:</span>
+                <span id="gamesPlayed">0</span>
+            </div>
+            <div class="stat-item">
+                <span>Games Won:</span>
+                <span id="gamesWon">0</span>
+            </div>
+            <div class="stat-item">
+                <span>Current Chips:</span>
+                <span id="currentChips">10,000</span>
+            </div>
+            <div class="stat-item">
+                <span>Pot Size:</span>
+                <span id="potSize">0</span>
+            </div>
+            <div class="stat-item">
+                <span>Room:</span>
+                <span id="roomInfo">-</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="debug-info" id="debugInfo">
+        Loading components...
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/phaser@3.70.0/dist/phaser.min.js"></script>
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <script src="poker-game.js"></script>
+    <script src="multiplayer.js"></script>
+    
+    <script>
+        // Enhanced debugging
+        const debugInfo = document.getElementById('debugInfo');
+        
+        function updateDebug(message) {
+            console.log(message);
+            const time = new Date().toLocaleTimeString();
+            debugInfo.innerHTML += '<br>[' + time + '] ' + message;
+            debugInfo.scrollTop = debugInfo.scrollHeight;
+        }
+
+        window.addEventListener('error', function(e) {
+            updateDebug('ERROR: ' + e.error.message);
+            console.error('Global error:', e.error);
+        });
+        
+        window.addEventListener('unhandledrejection', function(e) {
+            updateDebug('PROMISE ERROR: ' + e.reason);
+            console.error('Unhandled promise rejection:', e.reason);
+        });
+        
+        updateDebug('Page loaded');
+        updateDebug('Phaser: ' + (typeof Phaser !== 'undefined' ? 'OK' : 'MISSING'));
+        updateDebug('Socket.io: ' + (typeof io !== 'undefined' ? 'OK' : 'MISSING'));
+        
+        // Monitor when scripts load
+        setTimeout(() => {
+            updateDebug('PokerGame: ' + (typeof PokerGame !== 'undefined' ? 'OK' : 'MISSING'));
+            updateDebug('MultiplayerPokerGame: ' + (typeof MultiplayerPokerGame !== 'undefined' ? 'OK' : 'MISSING'));
+            updateDebug('window.multiplayerGame: ' + (window.multiplayerGame ? 'OK' : 'MISSING'));
+        }, 500);
+    </script>
+</body>
+</html>
+
+
+
+
