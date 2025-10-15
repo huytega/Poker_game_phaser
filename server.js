@@ -1,3 +1,4 @@
+
 const express = require('express');
 const http = require('http');
 const socketIo = require('socket.io');
@@ -6,10 +7,15 @@ const path = require('path');
 
 const app = express();
 const server = http.createServer(app);
-const io = socketIo(server);
+const io = socketIo(server, {
+    cors: {
+        origin: "*",
+        methods: ["GET", "POST"]
+    }
+});
 
 // Serve static files from root
-app.use(express.static(__dirname));
+app.use(express.static(path.join(__dirname)));
 
 // Serve socket.io client JS explicitly (for browser)
 app.get('/socket.io/socket.io.js', (req, res) => {
@@ -31,8 +37,14 @@ const SUITS = ['hearts', 'diamonds', 'clubs', 'spades'];
 const RANKS = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'];
 const RANK_VALUES = { '2': 2, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9, '10': 10, 'J': 11, 'Q': 12, 'K': 13, 'A': 14 };
 
+
 // Game rooms storage
 const rooms = new Map();
+
+// Generate random room ID (simple-server.js style)
+function generateRoomId() {
+    return Math.random().toString(36).substring(2, 8).toUpperCase();
+}
 
 class PokerRoom {
     constructor(roomId, hostName) {
@@ -523,14 +535,15 @@ io.on('connection', (socket) => {
     console.log('User connected:', socket.id);
 
     socket.on('createRoom', (data) => {
-        const roomId = uuidv4().substring(0, 6).toUpperCase();
+        const roomId = generateRoomId();
         const room = new PokerRoom(roomId, data.playerName);
-        
         const result = room.addPlayer(socket.id, data.playerName);
         if (result.success) {
             rooms.set(roomId, room);
+            room.host = socket.id;
             socket.join(roomId);
-            socket.emit('roomCreated', { roomId, gameState: room.getGameState(socket.id) });
+            socket.emit('roomCreated', { roomId, players: room.players, gameState: room.getGameState(socket.id) });
+            console.log(`Room ${roomId} created by ${data.playerName}`);
         } else {
             socket.emit('error', result.message);
         }
@@ -542,15 +555,22 @@ io.on('connection', (socket) => {
             socket.emit('error', 'Room not found');
             return;
         }
-
+        if (room.players.length >= CONFIG.maxPlayersPerRoom) {
+            socket.emit('error', 'Room is full');
+            return;
+        }
         const result = room.addPlayer(socket.id, data.playerName);
         if (result.success) {
             socket.join(data.roomId);
-            socket.emit('roomJoined', { gameState: room.getGameState(socket.id) });
-            io.to(data.roomId).emit('playerJoined', { 
-                playerName: data.playerName,
-                gameState: room.getGameState(socket.id)
-            });
+            socket.emit('roomJoined', { roomId: data.roomId, players: room.players, gameState: room.getGameState(socket.id) });
+            // Notify all players in room with updated player list and their own game state
+            for (const player of room.players) {
+                io.to(player.id).emit('playerJoined', {
+                    players: room.players,
+                    gameState: room.getGameState(player.id)
+                });
+            }
+            console.log(`${data.playerName} joined room ${data.roomId}`);
         } else {
             socket.emit('error', result.message);
         }
@@ -562,15 +582,15 @@ io.on('connection', (socket) => {
             socket.emit('error', 'Room not found');
             return;
         }
-
         const player = room.players.find(p => p.id === socket.id);
         if (!player || !player.isHost) {
             socket.emit('error', 'Only host can add bots');
             return;
         }
-
         room.addBots();
-        io.to(data.roomId).emit('botsAdded', { gameState: room.getGameState(socket.id) });
+        for (const player of room.players) {
+            io.to(player.id).emit('botsAdded', { players: room.players, gameState: room.getGameState(player.id) });
+        }
     });
 
     socket.on('startGame', (data) => {
@@ -579,16 +599,24 @@ io.on('connection', (socket) => {
             socket.emit('error', 'Room not found');
             return;
         }
-
-        const player = room.players.find(p => p.id === socket.id);
-        if (!player || !player.isHost) {
-            socket.emit('error', 'Only host can start game');
+        if (room.host !== socket.id) {
+            socket.emit('error', 'Not authorized to start game');
             return;
         }
-
+        if (room.players.length < CONFIG.minPlayersToStart) {
+            socket.emit('error', 'Need at least 2 players to start the game');
+            return;
+        }
+        if (room.gameStarted) {
+            socket.emit('error', 'Game already started');
+            return;
+        }
         const result = room.startGame();
         if (result.success) {
-            io.to(data.roomId).emit('gameStarted', { gameState: room.getGameState(socket.id) });
+            for (const player of room.players) {
+                io.to(player.id).emit('gameStarted', { players: room.players, gameState: room.getGameState(player.id) });
+            }
+            console.log(`Game started in room ${data.roomId}`);
         } else {
             socket.emit('error', result.message);
         }
@@ -600,15 +628,17 @@ io.on('connection', (socket) => {
             socket.emit('error', 'Room not found');
             return;
         }
-
         const result = room.playerAction(socket.id, data.action, data.amount);
         if (result.success) {
-            io.to(data.roomId).emit('actionPerformed', { 
-                playerId: socket.id,
-                action: data.action,
-                amount: data.amount,
-                gameState: room.getGameState(socket.id)
-            });
+            for (const player of room.players) {
+                io.to(player.id).emit('actionPerformed', {
+                    playerId: socket.id,
+                    action: data.action,
+                    amount: data.amount,
+                    players: room.players,
+                    gameState: room.getGameState(player.id)
+                });
+            }
         } else {
             socket.emit('error', result.message);
         }
@@ -616,16 +646,29 @@ io.on('connection', (socket) => {
 
     socket.on('disconnect', () => {
         console.log('User disconnected:', socket.id);
-        
         // Remove player from all rooms
         for (const [roomId, room] of rooms.entries()) {
-            if (room.removePlayer(socket.id)) {
-                io.to(roomId).emit('playerLeft', { gameState: room.getGameState() });
-                
-                // Delete room if empty
+            const playerIndex = room.players.findIndex(p => p.id === socket.id);
+            if (playerIndex !== -1) {
+                room.players.splice(playerIndex, 1);
+                room.removePlayer(socket.id);
+                // If room is empty, delete it
                 if (room.players.length === 0) {
                     rooms.delete(roomId);
-                    console.log(`Deleted empty room ${roomId}`);
+                    console.log(`Room ${roomId} deleted (empty)`);
+                } else {
+                    // If host left, assign new host
+                    if (room.host === socket.id) {
+                        room.host = room.players[0].id;
+                        room.players[0].isHost = true;
+                    }
+                    // Notify remaining players
+                    for (const player of room.players) {
+                        io.to(player.id).emit('playerLeft', {
+                            players: room.players,
+                            gameState: room.getGameState(player.id)
+                        });
+                    }
                 }
                 break;
             }
